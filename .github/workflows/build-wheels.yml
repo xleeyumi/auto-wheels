@@ -1,0 +1,240 @@
+name: Build Wheels
+
+# =============================================================================
+# 手动触发：上传 requirements 内容 → 为指定架构构建 wheel → 发布可被
+# `pip --find-links` 直接使用的静态索引（GitHub Pages）或 Release 归档。
+# =============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      requirements_text:
+        description: "requirements.txt 内容（多行，留空则使用仓库里的 requirements_file）"
+        type: string
+        required: false
+        default: ""
+      requirements_file:
+        description: "仓库内的 requirements 文件路径"
+        type: string
+        required: false
+        default: "requirements.txt"
+      platforms:
+        description: "目标平台，逗号分隔（可选值见 platforms.json）"
+        type: string
+        required: false
+        default: "manylinux2014_aarch64"
+      python_versions:
+        description: "Python 版本，逗号分隔"
+        type: string
+        required: false
+        default: "3.9,3.10,3.11,3.12"
+      system_packages:
+        description: "额外的系统依赖包名（yum/apt/apk，空格分隔）"
+        type: string
+        required: false
+        default: ""
+      pip_args:
+        description: "追加给 pip wheel 的参数"
+        type: string
+        required: false
+        default: "--prefer-binary"
+      publish_target:
+        description: "发布目标"
+        type: choice
+        options:
+          - pages
+          - release
+          - both
+          - none
+        default: "pages"
+      release_tag:
+        description: "Release 标签（publish_target 含 release 时生效）"
+        type: string
+        required: false
+        default: "wheels"
+      pages_branch:
+        description: "GitHub Pages 所在分支"
+        type: string
+        required: false
+        default: "gh-pages"
+      ignore_build_errors:
+        description: "单个依赖构建失败时是否继续（true/false）"
+        type: choice
+        options:
+          - "true"
+          - "false"
+        default: "true"
+      strict_repair:
+        description: "auditwheel 修复失败时是否让任务失败（true/false）"
+        type: choice
+        options:
+          - "false"
+          - "true"
+        default: "false"
+
+# 同一时间只允许一个发布流程操作 gh-pages，避免推送冲突
+concurrency:
+  group: wheelhouse-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. 校验输入并生成构建矩阵
+  # ---------------------------------------------------------------------------
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      platforms: ${{ steps.matrix.outputs.platforms }}
+      pythons: ${{ steps.matrix.outputs.pythons }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: matrix
+        name: 生成矩阵
+        env:
+          PLATFORMS: ${{ inputs.platforms }}
+          PYTHON_VERSIONS: ${{ inputs.python_versions }}
+        run: python3 scripts/make-matrix.py
+
+  # ---------------------------------------------------------------------------
+  # 2. 逐平台构建 wheel（跨架构通过 QEMU + docker 完成）
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build (${{ matrix.name }})
+    needs: prepare
+    runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 固化 requirements 输入
+        env:
+          REQ_TEXT: ${{ inputs.requirements_text }}
+          REQ_FILE: ${{ inputs.requirements_file }}
+        run: bash scripts/prepare-inputs.sh
+
+      - name: 注册 QEMU 多架构模拟
+        if: matrix.qemu != ''
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: ${{ matrix.qemu }}
+
+      - name: 缓存 pip 下载缓存
+        uses: actions/cache@v4
+        with:
+          path: ci/cache/pip
+          key: pip-${{ matrix.name }}-${{ inputs.python_versions }}-${{ hashFiles('ci/requirements.txt') }}
+          restore-keys: |
+            pip-${{ matrix.name }}-${{ inputs.python_versions }}-
+            pip-${{ matrix.name }}-
+
+      - name: 构建 wheel
+        env:
+          PLATFORM_NAME: ${{ matrix.name }}
+          IMAGE: ${{ matrix.image }}
+          DOCKER_PLATFORM: ${{ matrix.docker_platform }}
+          INTERPRETER: ${{ matrix.interpreter }}
+          REPAIR: ${{ matrix.repair }}
+          SYS_PKGS: ${{ matrix.sys_pkgs }} ${{ inputs.system_packages }}
+          PYTHON_VERSIONS: ${{ inputs.python_versions }}
+          EXTRA_PIP_ARGS: ${{ inputs.pip_args }}
+          IGNORE_BUILD_ERRORS: ${{ inputs.ignore_build_errors }}
+          STRICT_REPAIR: ${{ inputs.strict_repair }}
+        run: bash scripts/run-build.sh
+
+      - name: 写入任务摘要
+        if: always()
+        env:
+          M_NAME: ${{ matrix.name }}
+          M_DESC: ${{ matrix.description }}
+          M_IMAGE: ${{ matrix.image }}
+          M_PLATFORM: ${{ matrix.docker_platform }}
+        run: |
+          {
+            echo "### ${M_NAME} — ${M_DESC}"
+            echo
+            echo "镜像：\`${M_IMAGE}\`　架构：\`${M_PLATFORM}\`"
+            echo
+            if compgen -G "wheelhouse/*.whl" > /dev/null; then
+              echo "产出 wheel：$(ls -1 wheelhouse/*.whl | wc -l) 个"
+            else
+              echo "⚠️ 没有产出任何 wheel"
+            fi
+            if compgen -G "ci/build-failures-*.txt" > /dev/null; then
+              echo
+              echo '```'
+              cat ci/build-failures-*.txt
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传 wheel 制品
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.name }}
+          path: |
+            wheelhouse/*.whl
+            ci/build-failures-*.txt
+          if-no-files-found: warn
+          retention-days: 7
+          overwrite: true
+
+  # ---------------------------------------------------------------------------
+  # 3. 汇总并发布
+  # ---------------------------------------------------------------------------
+  publish:
+    name: Publish
+    needs: build
+    if: >-
+      always()
+      && needs.build.result != 'cancelled'
+      && inputs.publish_target != 'none'
+      && (needs.build.result == 'success' || inputs.ignore_build_errors == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 下载全部 wheel 制品
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: wheelhouse
+
+      - name: 校验产物
+        run: |
+          count=$(ls -1 wheelhouse/*.whl 2>/dev/null | wc -l)
+          echo "本次汇总 wheel：$count 个"
+          if [ "$count" -eq 0 ]; then
+            echo "::error::没有任何 wheel 可以发布"
+            exit 1
+          fi
+          ls -1 wheelhouse/*.whl | sed 's#.*/#- #'
+
+      - name: 发布到 GitHub Pages（find-links 索引）
+        if: inputs.publish_target == 'pages' || inputs.publish_target == 'both'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PAGES_BRANCH: ${{ inputs.pages_branch }}
+          SITE_TITLE: Python Wheelhouse
+        run: bash scripts/publish-pages.sh
+
+      - name: 归档到 GitHub Release
+        if: inputs.publish_target == 'release' || inputs.publish_target == 'both'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: bash scripts/publish-release.sh

@@ -1,0 +1,17 @@
+# 构建过程产生的中间目录（每次运行由 workflow 重新生成）
+/ci/
+/wheelhouse/
+/.pages-worktree/
+/publish/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,6 @@
+# 默认依赖清单示例。
+# 触发 workflow 时不填 requirements_text，就会使用本文件的内容。
+# 建议显式锁定版本，保证每次构建出的 wheelhouse 一致。
+numpy==1.26.4
+pandas==2.2.2
+pyyaml==6.0.2
