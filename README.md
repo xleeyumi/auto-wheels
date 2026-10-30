@@ -87,6 +87,7 @@ Actions → **Build Wheels** → *Run workflow*，填写：
 | `pages_branch` | Pages 分支 | `gh-pages` |
 | `ignore_build_errors` | 单个依赖失败是否继续 | `true` |
 | `strict_repair` | auditwheel 修复失败是否报错 | `false` |
+| `repair` | 修复策略：`auto`（按 platforms.json）/ `auditwheel` / `none` | `auto` |
 
 ### 方式 B：命令行（适合把 requirements 文件直接“上传”）
 
@@ -295,26 +296,32 @@ Release 附件页面是**分页**的（每页 10 个），wheel 一多 pip 就�
 
 **Q：`psycopg[binary]` 在 ARM 设备上装不上？**
 `psycopg-binary` 只发布 x86_64 / aarch64(manylinux) / macOS / Windows 的预编译 wheel，32 位 ARM
-（armv7l）根本没有，piwheels 也没有 cp312 版本。改用 C 实现，任何架构都能从源码编出来：
+（armv7l）既没有 wheel 也没有 sdist，pip 直接 `No matching distribution`。用环境标记按架构分流，
+其余平台继续享受预编译 libpq：
 
-```diff
-- psycopg[binary]>=3.1
-+ psycopg[c]>=3.1
+```python
+psycopg[binary]>=3.1; platform_machine != "armv7l"
+psycopg[c]>=3.1;     platform_machine == "armv7l"
 ```
 
 ```bash
--f system_packages="libpq-dev"
+-f system_packages="libpq-dev"        # armv7l 构建时需要 libpq 头文件
 ```
 
-注意四点：
+注意五点：
 
-* **libpq 必须 ≥ 10**：`manylinux2014_*`（CentOS 7 基线）自带 libpq 9.2，编译会报
-  `PQsslInUse undeclared`；这种情况请改用 `manylinux_2_28_*`，或 32 位 ARM 用 `armv7l`
-  （Debian bookworm，libpq 15）。
 * wheelhouse 里会同时出现 `psycopg-*.whl`（纯 Python）和 `psycopg_c-*.whl`（C 扩展），
-  设备上装 `psycopg[c]` 时需要两者都在。
-* 设备运行需要 libpq 运行库：`apt install libpq5`（RHEL 系为 `libpq`）。
-* 不追求性能的话，去掉 extra 直接写 `psycopg` 也能用（纯 Python 实现，零编译）。
+  设备上装 `psycopg[c]` 时两个都要在索引里。
+* **目标机需要 libpq 运行库**：`apt install libpq5`（RHEL 系 `libpq`）。armv7l 的 wheel 是
+  `linux_armv7l`（未做 auditwheel 修复），所以不会把 libpq 打进 wheel。
+  > 为什么不在 armv7l 上 auditwheel 打包 libpq：Debian bookworm 的 `patchelf` 是 0.14.3，
+  > 低于 auditwheel 6 要求的 0.14.5；退到 auditwheel 5.x 又缺 armv7l 策略支持。
+* **libpq 必须 ≥ 10**：`manylinux2014_*`（CentOS 7 基线）自带 libpq 9.2，编译会报
+  `PQsslInUse undeclared`；请改用 `manylinux_2_28_*`，或 `armv7l`（bookworm，libpq 15）。
+* `manylinux_2_28_*` 上执行 `-f repair=auditwheel` 可以把 libpq 一起 graft 进 wheel，
+  那种产物在目标机就不需要装 libpq 了。
+* 设备是树莓派 4/5 这类 64 位硬件时，**换 aarch64 系统是更彻底的选择**：`psycopg[binary]`、
+  numpy、pandas 全都有预编译 wheel，piwheels 的 cp312 缺档也不再影响你。
 
 **Q：armv7l 上 `numpy` / `pandas` 编译失败或超时？**
 32 位 ARM 上这两个包**没有预编译 wheel**（piwheels 也没有 cp312），只能现场编译，且 numpy 需要

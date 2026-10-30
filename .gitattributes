@@ -1,0 +1,4 @@
+# 统一换行符为 LF。
+# 本仓库的 shell/python 脚本会直接在 Linux 容器与 GitHub Runner 里执行，
+# 若在 Windows 上以 CRLF 检出，会出现 “bad interpreter: /usr/bin/env bash^M” 之类错误。
+* text=auto eol=lf

@@ -28,6 +28,11 @@ if [ -z "${INTERPRETER:-}" ]; then
   INTERPRETER='/opt/python/{cptag}-{cptag}/bin/python'
 fi
 REPAIR="${REPAIR:-auditwheel}"
+# 触发时可覆盖平台默认的修复策略：auto=按 platforms.json，auditwheel=强制修复
+REPAIR_OVERRIDE="${REPAIR_OVERRIDE:-auto}"
+if [ "$REPAIR_OVERRIDE" != "auto" ] && [ -n "$REPAIR_OVERRIDE" ]; then
+  REPAIR="$REPAIR_OVERRIDE"
+fi
 SYS_PKGS="${SYS_PKGS:-}"
 PYTHON_VERSIONS="${PYTHON_VERSIONS:?PYTHON_VERSIONS 不能为空}"
 EXTRA_PIP_ARGS="${EXTRA_PIP_ARGS:-}"

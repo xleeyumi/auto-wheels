@@ -1,0 +1,27 @@
+# workbuddy-manager / server 的依赖清单（ARM 设备构建用）
+#
+# 与本项目 server/requirements.txt 的差异只在最后 psycopg 那两行：
+# 用环境标记按架构二选一，其余原样保留。
+fastapi>=0.115.0
+python-multipart>=0.0.9
+uvicorn[standard]>=0.30.0
+httpx>=0.27.0
+# SOCKS5 代理支持（httpx 的 socks extra 就是它）。代理线路与 WB_HTTP_PROXY
+# 都可以填 socks5://，而住宅代理服务商给的凭据常常就是 socks5 写法（实测
+# ProxyLane 直接给的是 socks5://）。缺了它 httpx 会抛
+# 「ImportError: Using SOCKS proxy, but the 'socksio' package is not installed」——
+# 用户看到的是「装了 socksio 才能用」，而不是「代理不通」。
+socksio>=1.0.0
+pydantic>=2.7.0
+# PostgreSQL 异地备份的驱动（见 services/pgsync）。原方案装 [binary] 是为了拿到
+# 预编译的 libpq —— 纯 Python 版要求目标机上已有 libpq，而面板的部署环境
+# （容器 / systemd / Windows 原生）不保证有。用不到这个功能的部署不受影响：
+# 驱动是**按需导入**的，没装也能正常启动，只是备份页会提示去装。
+#
+# 但 [binary] 只发布 x86_64 / aarch64(manylinux) / macOS / Windows 的 wheel，
+# 32 位 ARM（armv7l）既没有 wheel 也没有 sdist，pip 会直接 No matching distribution。
+# 所以这里按架构分流：armv7l 用 C 实现 psycopg[c]，其它平台保持 [binary]。
+# 构建 armv7l 版时需要在容器里装 libpq 头文件 → 触发时加
+#   -f system_packages="libpq-dev libyaml-dev"
+psycopg[binary]>=3.1; platform_machine != "armv7l"
+psycopg[c]>=3.1; platform_machine == "armv7l"

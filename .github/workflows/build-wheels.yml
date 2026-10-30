@@ -71,6 +71,14 @@ on:
           - "false"
           - "true"
         default: "false"
+      repair:
+        description: "wheel 修复策略（auto=按 platforms.json，auditwheel=强制修复以打包系统库）"
+        type: choice
+        options:
+          - auto
+          - auditwheel
+          - none
+        default: auto
 
 # 同一时间只允许一个发布流程操作 gh-pages，避免推送冲突
 concurrency:
@@ -148,6 +156,7 @@ jobs:
           DOCKER_PLATFORM: ${{ matrix.docker_platform }}
           INTERPRETER: ${{ matrix.interpreter }}
           REPAIR: ${{ matrix.repair }}
+          REPAIR_OVERRIDE: ${{ inputs.repair }}
           SYS_PKGS: ${{ matrix.sys_pkgs }} ${{ inputs.system_packages }}
           PYTHON_VERSIONS: ${{ inputs.python_versions }}
           EXTRA_PIP_ARGS: ${{ inputs.pip_args }}
