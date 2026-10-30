@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Python Wheelhouse</title>
+<style>
+:root { color-scheme: light dark; }
+body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+       max-width: 980px; margin: 2rem auto; padding: 0 1rem; line-height: 1.6; }
+h1 { font-size: 1.5rem; border-bottom: 1px solid #8884; padding-bottom: .4rem; }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+th, td { border-bottom: 1px solid #8884; padding: .35rem .5rem; text-align: left;
+         vertical-align: top; }
+code, pre { font-family: ui-monospace, Consolas, monospace; }
+pre { background: #8881; padding: .8rem 1rem; border-radius: 6px; overflow-x: auto; }
+tr:target { background: #ffd54f44; }
+</style>
+</head>
+<body>
+
+<h1>Python Wheelhouse</h1>
+<p>共 <strong>4</strong> 个 wheel、<strong>4</strong> 个项目、
+<strong>3.8 MB</strong>。</p>
+
+<h2>客户端安装</h2>
+<pre>pip install --find-links https://xleeyumi.github.io/auto-wheels/wheels/ --prefer-binary -r requirements.txt</pre>
+<p>完全离线（不访问 PyPI）：</p>
+<pre>pip install --no-index --find-links https://xleeyumi.github.io/auto-wheels/wheels/ -r requirements.txt</pre>
+<p>长期生效可写入 <code>~/.pip/pip.conf</code>（Windows：<code>%APPDATA%\pip\pip.ini</code>）：</p>
+<pre>[global]
+find-links = https://xleeyumi.github.io/auto-wheels/wheels/
+prefer-binary = true</pre>
+<p>也可以当作 PEP 503 索引使用：</p>
+<pre>pip install --index-url https://xleeyumi.github.io/auto-wheels/simple/ --trusted-host xleeyumi.github.io</pre>
+
+<h2>平台覆盖</h2>
+<table><thead><tr><th>wheel 平台标签</th><th>适用设备</th><th>数量</th></tr></thead>
+<tbody><tr><td><code>any</code></td><td>—</td><td>2</td></tr><tr><td><code>linux_armv7l</code></td><td>ARMv7 / glibc（树莓派 32 位）</td><td>2</td></tr></tbody></table>
+
+<p><a href="wheels/">→ 浏览全部 wheel 文件</a></p>
+
+<hr><p><a href="./">← 返回首页</a></p>
+</body>
+</html>
