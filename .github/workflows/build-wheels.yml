@@ -214,18 +214,24 @@ jobs:
         with:
           pattern: wheels-*
           merge-multiple: true
-          path: wheelhouse
+          # 下载到工作区根目录：artifact 内部保留的是 "wheelhouse/xxx.whl" 相对路径，
+          # 若这里写 path: wheelhouse 就会变成 wheelhouse/wheelhouse/xxx.whl
+          path: .
 
       - name: 校验产物
         run: |
+          # 兼容性兜底：万一 artifact 布局又带上了一层前缀
+          if [ -d wheelhouse/wheelhouse ]; then
+            mv -f wheelhouse/wheelhouse/*.whl wheelhouse/ 2>/dev/null || true
+            rm -rf wheelhouse/wheelhouse
+          fi
           count=$(ls -1 wheelhouse/*.whl 2>/dev/null | wc -l)
           echo "本次汇总 wheel：$count 个"
           if [ "$count" -eq 0 ]; then
             echo "::error::没有任何 wheel 可以发布，请查看各 Build 任务的日志与 Job Summary"
-            if compgen -G "wheelhouse/ci/build-failures-*.txt" > /dev/null; then
-              echo "=== 构建失败清单 ==="
-              cat wheelhouse/ci/build-failures-*.txt
-            fi
+            for f in ci/build-failures-*.txt wheelhouse/ci/build-failures-*.txt; do
+              [ -f "$f" ] && { echo "=== $f ==="; cat "$f"; }
+            done
             echo "=== 制品目录内容 ==="
             ls -R wheelhouse || true
             exit 1
