@@ -221,10 +221,16 @@ jobs:
           count=$(ls -1 wheelhouse/*.whl 2>/dev/null | wc -l)
           echo "本次汇总 wheel：$count 个"
           if [ "$count" -eq 0 ]; then
-            echo "::error::没有任何 wheel 可以发布"
+            echo "::error::没有任何 wheel 可以发布，请查看各 Build 任务的日志与 Job Summary"
+            if compgen -G "wheelhouse/ci/build-failures-*.txt" > /dev/null; then
+              echo "=== 构建失败清单 ==="
+              cat wheelhouse/ci/build-failures-*.txt
+            fi
+            echo "=== 制品目录内容 ==="
+            ls -R wheelhouse || true
             exit 1
           fi
-          ls -1 wheelhouse/*.whl | sed 's#.*/#- #'
+          ls -1 wheelhouse/*.whl | sed 's#.*/#-  #'
 
       - name: 发布到 GitHub Pages（find-links 索引）
         if: inputs.publish_target == 'pages' || inputs.publish_target == 'both'

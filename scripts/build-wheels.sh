@@ -203,10 +203,15 @@ repair_all() {
 # ---------------------------------------------------------------------------
 # 5. 结果汇总
 # ---------------------------------------------------------------------------
+# 本次运行（单个容器 = 单个 Python 版本）实际构建出的 wheel 数量
+raw_wheel_count() {
+  ls -1 "$RAW_DIR"/*.whl 2>/dev/null | wc -l | tr -d ' '
+}
+
 summary() {
   local count
   count=$(ls -1 "$OUT_DIR"/*.whl 2>/dev/null | wc -l | tr -d ' ')
-  log "输出目录: $OUT_DIR（$count 个 wheel）"
+  log "输出目录: $OUT_DIR（累计 $count 个 wheel）"
   ls -1 "$OUT_DIR"/*.whl 2>/dev/null | sed -e 's#.*/#    #' || true
 
   if [ ${#WARN_MSGS[@]} -gt 0 ]; then
@@ -249,6 +254,16 @@ if ! build_from_requirements; then
     exit 1
   fi
 fi
+
+# 零产出属于硬失败：即使开了容错，也不该让「一个 wheel 都没构建出来」的任务变绿
+produced=$(raw_wheel_count)
+if [ "${produced:-0}" -eq 0 ]; then
+  err "本次没有构建出任何 wheel（pip 一个包都没成功），按硬失败处理"
+  FAILED_PKGS+=("（零产出：pip 未生成任何 wheel，请检查上方 pip 报错）")
+  summary || true
+  exit 1
+fi
+log "本次构建出 $produced 个 wheel"
 
 repair_ok=1
 repair_all || repair_ok=0

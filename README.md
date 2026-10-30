@@ -261,6 +261,28 @@ Release 附件页面是**分页**的（每页 10 个），wheel 一多 pip 就�
 
 ## 六、常见问题
 
+**Q：publish 报「没有任何 wheel 可以发布」？**
+说明 build 阶段零产出，`ignore_build_errors=true` 只是吞掉了单项失败。到 Actions 里点开对应
+`Build (<platform>)` 任务，Job Summary 与日志里的 `### ❌ Python 3.x 构建失败` 会列出失败的包，
+上方 `pip` 输出就是真实原因（通常是缺系统头文件、编译器或内存不足）。
+> 现版本已把「一个 wheel 都没构建出来」判为硬失败，不会再出现 build 全绿、publish 才报错的情况。
+
+**Q：armv7l 上 `numpy` / `pandas` 编译失败或超时？**
+32 位 ARM 上这两个包**没有预编译 wheel**（piwheels 也没有 cp312），只能现场编译，且 numpy 需要
+BLAS/Fortran：
+
+```bash
+-f system_packages="gfortran libopenblas-dev liblapack-dev"
+```
+
+即便如此，QEMU 模拟下 numpy/pandas 仍可能耗时 1 小时以上甚至 OOM。更务实的做法：
+
+* 设备上直接用发行版包：`apt install python3-numpy python3-pandas`（venv 里可用
+  `--system-site-packages` 复用，或 `pip install --no-deps` 后手动补依赖）；
+* 或者拆成两份 requirements：先跑纯 Python / 小体积的包验证链路，重编译包单独触发、单独调大
+  `timeout-minutes`；
+* 长期方案是把 `platforms.json` 里 `armv7l` 的 `runs_on` 换成自托管 ARM runner，彻底绕开 QEMU。
+
 **Q：ARM 构建特别慢 / 超时？**
 QEMU 模拟下编译 `numpy`/`scipy` 这类包可能需要几十分钟。优先确认 PyPI 是否已有该架构
 wheel（有的话只是下载）；确实要现场编译时，精简 `python_versions`、减少 `platforms`，
