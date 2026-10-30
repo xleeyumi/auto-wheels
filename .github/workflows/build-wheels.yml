@@ -94,6 +94,7 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       platforms: ${{ steps.matrix.outputs.platforms }}
       pythons: ${{ steps.matrix.outputs.pythons }}
+      cache_versions: ${{ steps.matrix.outputs.cache_versions }}
     steps:
       - uses: actions/checkout@v4
       - id: matrix
@@ -134,9 +135,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ci/cache/pip
-          key: pip-${{ matrix.name }}-${{ inputs.python_versions }}-${{ hashFiles('ci/requirements.txt') }}
+          # 注意：cache key 不能包含逗号，故使用 cache_versions（3.9-3.10-3.11）
+          key: pip-${{ matrix.name }}-${{ needs.prepare.outputs.cache_versions }}-${{ hashFiles('ci/requirements.txt') }}
           restore-keys: |
-            pip-${{ matrix.name }}-${{ inputs.python_versions }}-
+            pip-${{ matrix.name }}-${{ needs.prepare.outputs.cache_versions }}-
             pip-${{ matrix.name }}-
 
       - name: 构建 wheel

@@ -28,7 +28,8 @@ workflow_dispatch(requirements + 平台 + Python 版本)
 | `scripts/run-build.sh` | 宿主机侧：按 Python 版本逐个启动目标架构容器 |
 | `scripts/build-wheels.sh` | 容器内：装系统依赖 → `pip wheel` → `auditwheel repair` |
 | `scripts/gen_index.py` | 生成 find-links 列表页 + PEP 503 简单索引 + 首页 |
-| `scripts/publish-pages.sh` | 增量发布到 `gh-pages` |
+| `scripts/publish-pages.sh` | 增量发布到 `gh-pages`（分支不存在时自动创建） |
+| `scripts/init-pages-branch.sh` | 可选：手动先建一个空的 `gh-pages`，便于提前配置 Pages |
 | `scripts/publish-release.sh` | 可选：额外归档到 GitHub Release |
 | `requirements.txt` | 默认依赖清单（不填 `requirements_text` 时使用） |
 
@@ -36,10 +37,31 @@ workflow_dispatch(requirements + 平台 + Python 版本)
 
 1. **推送仓库并开启 Pages**
 
-   Settings → Pages → Source 选 **Deploy from a branch** → 分支 `gh-pages` → 目录 `/ (root)`。
-   > 第一次运行发布时 `gh-pages` 分支会被自动创建；Pages 开启动作脚本也会尝试自动完成，
-   > 但通常需要仓库管理权限，失败时按上面的路径手点一次即可。
+   `gh-pages` 分支**不会**在 push 代码时出现——它由 workflow 第一次发布时创建。
+   所以有两种顺序：
+
+   *顺序 A（推荐，先跑再配）*
+
+   ```bash
+   # 手动跑一次（默认 publish_target=pages，Publish 任务成功后就出现 gh-pages）
+   gh workflow run build-wheels.yml -f platforms=manylinux2014_x86_64 \
+       -f python_versions=3.11
+   gh run watch
+   ```
+
+   等 `Publish` 任务变绿后，Settings → Pages → **Deploy from a branch** → `gh-pages` → `/ (root)`。
+
+   *顺序 B（先配 Pages 再构建）*
+
+   ```bash
+   bash scripts/init-pages-branch.sh    # 建一个只含占位页的 gh-pages 分支
+   ```
+
+   然后在 Settings → Pages 里选 `gh-pages`。该脚本用临时 index 生成根提交后直接推送，
+   不会切换分支、不会提交你的项目文件。
+
    > 私有仓库的 Pages 需要付费套餐，否则请用 `publish_target=release`。
+   > Pages 开启后首次部署需要几十秒，`https://<owner>.github.io/<repo>/wheels/` 才有内容。
 
 2. **确认 workflow 权限**
 
@@ -106,6 +128,30 @@ gh run watch
 跨架构构建靠 **QEMU 用户态模拟**：`linux/arm64` 用 `arm64`，`linux/arm/v7` 用 `arm`。
 因此 ARM 任务比原生慢（尤其要现场编译 C 扩展时），但 PyPI 上已有对应架构 wheel 的包
 只是被下载并收进仓库，速度很快。
+
+### 怎么确认目标设备该选哪个 key
+
+在**目标设备**上执行：
+
+```bash
+python -c "import sys, sysconfig; print('arch  :', sysconfig.get_platform()); print('python:', sys.version.split()[0])"
+ldd --version | head -1          # glibc 版本；Alpine（musl）没有输出，看 /etc/alpine-release
+python -m pip debug --verbose | sed -n '/Compatible tags/,+4p'
+```
+
+判读规则：
+
+* `Compatible tags` 里出现 `manylinux_2_28_aarch64` → 选 `manylinux_2_28_aarch64`；
+  只要它出现，`manylinux2014_aarch64` 也一定能装（基线更老，兼容性更好，**优先选它**）。
+* 出现 `musllinux_1_2_*` → 系统是 musl（Alpine 类），选对应的 musllinux key。
+* 只有 `linux_armv7l`（没有 `manylinux_*`）→ 选 `armv7l`。
+* 只有 `linux_x86_64` 且带 `manylinux_2_17` → 选 `manylinux2014_x86_64`。
+
+另外两点必须对上：
+
+1. **Python 版本**：设备的 `python` 是 3.12 → `python_versions` 里必须含 `3.12`（wheel 按 `cp312` 打标签）。
+2. **glibc 不能比 wheel 基线更旧**：设备 `ldd` 报 2.39 时，2.17 / 2.28 的 wheel 都能装；
+   反过来设备 2.17 装不了 2.28 基线构建出来的 wheel。
 
 ## 四、客户端使用（find-links）
 
@@ -219,6 +265,16 @@ Release 附件页面是**分页**的（每页 10 个），wheel 一多 pip 就�
 QEMU 模拟下编译 `numpy`/`scipy` 这类包可能需要几十分钟。优先确认 PyPI 是否已有该架构
 wheel（有的话只是下载）；确实要现场编译时，精简 `python_versions`、减少 `platforms`，
 或改用原生 ARM runner（`platforms.json` 里的 `runs_on` 换成自托管 runner 标签）。
+
+**Q：Settings → Pages 里选不到 `gh-pages` 分支？**
+这个分支要等 workflow 第一次**发布成功**才出现，push 代码不会产生它。两种解法：
+跑一次 `Build Wheels`（`publish_target=pages`），或先执行 `bash scripts/init-pages-branch.sh`。
+
+**Q：跑了 workflow 还是没有 `gh-pages`？**
+依次检查：① `publish_target` 是不是 `none`；② `Publish` 任务是否被跳过——它的条件是
+「build 成功，或 `ignore_build_errors=true`」；③ `Publish` 日志里 `待发布 wheel` 是否为 0
+（没有 wheel 就不会建分支）；④ 仓库 Settings → Actions → Workflow permissions 是否为
+**Read and write**。
 
 **Q：某个包装不上 / 编译报错缺头文件？**
 把对应的系统包名填到 `system_packages`，例如 `lxml` → `libxml2-dev libxslt1-dev`，

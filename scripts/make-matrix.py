@@ -80,6 +80,8 @@ def main() -> None:
         "matrix": json.dumps(matrix, ensure_ascii=False),
         "platforms": ",".join(platforms),
         "pythons": ",".join(pythons),
+        # 缓存 key 不允许逗号，这里预先拼成 3.9-3.10-3.11 形式
+        "cache_versions": "-".join(pythons),
     }
 
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
