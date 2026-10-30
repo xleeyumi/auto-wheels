@@ -117,6 +117,9 @@ gh run watch
 | `armv7l` | 树莓派 32 位 Raspberry Pi OS | Debian bookworm 基线，wheel 标签为 `linux_armv7l` |
 | `musllinux_1_2_armv7l` | Alpine on 树莓派 32 位 | musl ≥ 1.2 |
 
+> `manylinux2014_*` 的基线是 CentOS 7，系统库偏老（例如 libpq 9.2）。需要较新系统库才能编译的
+> 包（如 `psycopg[c]`）请改用 `manylinux_2_28_*`；32 位 ARM 的 `armv7l` 是 Debian 12 基线，库比较新。
+
 新增平台只需在 `platforms.json` 里加一条（镜像、`docker_platform`、`qemu`、`interpreter`、
 `repair`）。`ppc64le` / `s390x` 用同样的方式加 `quay.io/pypa/manylinux2014_ppc64le` 即可。
 
@@ -227,6 +230,29 @@ auditwheel repair -w wheelhouse /tmp/wheelbuild/raw/*.whl                # 打�
 * `REPAIR=none` 的平台（如 32 位 ARM Debian）保留 `linux_armv7l` 原始标签，同平台 pip 可直接安装；
 * `auditwheel` 修复失败时默认只告警并保留原始 wheel（`strict_repair=false`）。
 
+### 系统依赖（跨发行版包名）
+
+`system_packages` 里**只需写一种风格**（以 Debian 的 `-dev` 命名为准），脚本按镜像里的包管理器
+自动翻译：
+
+| 你填的 | apt（Debian/Ubuntu） | yum（manylinux2014/2_28） | apk（musllinux） |
+| --- | --- | --- | --- |
+| `libpq-dev` | `libpq-dev` | `libpq-devel` → 回退 `postgresql-devel` | `postgresql-dev` |
+| `libxml2-devel` | `libxml2-dev` | `libxml2-devel` | `libxml2-dev` |
+| `libxslt-devel` | `libxslt1-dev` | `libxslt-devel` | `libxslt-dev` |
+| `libssl-dev` | `libssl-dev` | `openssl-devel` | `openssl-dev` |
+| `libffi-dev` | `libffi-dev` | `libffi-devel` | `libffi-dev` |
+| `libyaml-dev` | `libyaml-dev` | `libyaml-devel` | `yaml-dev` |
+| `libjpeg-dev` | `libjpeg-dev` | `libjpeg-turbo-devel` | `libjpeg-turbo-dev` |
+| `zlib1g-dev` | `zlib1g-dev` | `zlib-devel` | `zlib-dev` |
+| `build-essential` | `build-essential` | — | `build-base` |
+| `pkg-config` | `pkg-config` | `pkg-config` | `pkgconf` |
+| `libopenblas-dev` / `liblapack-dev` / `gfortran` | 同名 | `openblas-devel` / `lapack-devel` | `openblas-dev` / `lapack-dev` |
+
+实现细节：先整批装一次，失败则逐包重试候选名；yum/dnf 失败时会自动带
+`--disablerepo=epel` 重试（manylinux 镜像里预置的 epel metalink 基本都已失效，会让整批安装中断）。
+系统依赖装不上会**直接终止**该 Python 版本，而不是让 pip 在半路报一堆找不到头文件的错。
+
 ### 构建失败的容错
 
 `ignore_build_errors=true`（默认）时：
@@ -266,6 +292,29 @@ Release 附件页面是**分页**的（每页 10 个），wheel 一多 pip 就�
 `Build (<platform>)` 任务，Job Summary 与日志里的 `### ❌ Python 3.x 构建失败` 会列出失败的包，
 上方 `pip` 输出就是真实原因（通常是缺系统头文件、编译器或内存不足）。
 > 现版本已把「一个 wheel 都没构建出来」判为硬失败，不会再出现 build 全绿、publish 才报错的情况。
+
+**Q：`psycopg[binary]` 在 ARM 设备上装不上？**
+`psycopg-binary` 只发布 x86_64 / aarch64(manylinux) / macOS / Windows 的预编译 wheel，32 位 ARM
+（armv7l）根本没有，piwheels 也没有 cp312 版本。改用 C 实现，任何架构都能从源码编出来：
+
+```diff
+- psycopg[binary]>=3.1
++ psycopg[c]>=3.1
+```
+
+```bash
+-f system_packages="libpq-dev"
+```
+
+注意四点：
+
+* **libpq 必须 ≥ 10**：`manylinux2014_*`（CentOS 7 基线）自带 libpq 9.2，编译会报
+  `PQsslInUse undeclared`；这种情况请改用 `manylinux_2_28_*`，或 32 位 ARM 用 `armv7l`
+  （Debian bookworm，libpq 15）。
+* wheelhouse 里会同时出现 `psycopg-*.whl`（纯 Python）和 `psycopg_c-*.whl`（C 扩展），
+  设备上装 `psycopg[c]` 时需要两者都在。
+* 设备运行需要 libpq 运行库：`apt install libpq5`（RHEL 系为 `libpq`）。
+* 不追求性能的话，去掉 extra 直接写 `psycopg` 也能用（纯 Python 实现，零编译）。
 
 **Q：armv7l 上 `numpy` / `pandas` 编译失败或超时？**
 32 位 ARM 上这两个包**没有预编译 wheel**（piwheels 也没有 cp312），只能现场编译，且 numpy 需要

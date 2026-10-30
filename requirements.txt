@@ -1,6 +1,17 @@
-# 默认依赖清单示例。
-# 触发 workflow 时不填 requirements_text，就会使用本文件的内容。
+# 默认依赖清单示例：触发 workflow 时不填 requirements_text，就用本文件。
 # 建议显式锁定版本，保证每次构建出的 wheelhouse 一致。
-numpy==1.26.4
-pandas==2.2.2
+#
+# 关于 psycopg 的两种实现（ARM 设备上很关键）：
+#   psycopg[binary] —— 只提供 x86_64 / aarch64(manylinux) / macOS / Windows 的预编译
+#                      wheel，32 位 ARM（armv7l）根本没有，pip 会直接失败；
+#   psycopg[c]      —— C 实现，从源码编译，任何架构都能编出来（需要 libpq 头文件，
+#                      见 README 的 system_packages 说明）。
+# 产出的 wheelhouse 里会同时包含 psycopg-*.whl（纯 Python）和 psycopg_c-*.whl（C 扩展）。
+psycopg[c]>=3.1
+
+# 带 C 扩展的轻量包，需要 libyaml
 pyyaml==6.0.2
+
+# 体积大、编译时间长的包建议单独一份 requirements 触发，避免一个超时拖垮整批：
+# numpy==1.26.4
+# pandas==2.2.2

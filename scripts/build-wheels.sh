@@ -54,28 +54,154 @@ is_true() {
 }
 
 # ---------------------------------------------------------------------------
-# 1. 系统依赖（编译某些包需要 libxml2-devel / libffi-devel 等）
+# 1. 系统依赖（编译某些包需要 libxml2 / libpq / libffi 等头文件）
+#
+# 用户只需要记住一种写法（这里以 Debian 的 -dev 命名为准），脚本会按镜像里的
+# 包管理器自动翻译成 yum 的 -devel / apk 的命名，例如：
+#   libpq-dev → yum: libpq-devel 或 postgresql-devel（EL7）
+#             → apk: postgresql-dev
 # ---------------------------------------------------------------------------
-install_sys_pkgs() {
-  local pkgs="${SYS_PKGS//,/ }"
-  [ -z "${pkgs//[[:space:]]/}" ] && return 0
+detect_pkg_manager() {
+  if command -v yum >/dev/null 2>&1; then echo yum
+  elif command -v dnf >/dev/null 2>&1; then echo dnf
+  elif command -v microdnf >/dev/null 2>&1; then echo microdnf
+  elif command -v apt-get >/dev/null 2>&1; then echo apt
+  elif command -v apk >/dev/null 2>&1; then echo apk
+  else echo ""; fi
+}
 
-  log "安装系统依赖: $pkgs"
-  if command -v yum >/dev/null 2>&1; then
-    yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $pkgs
-  elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y $pkgs
-  elif command -v microdnf >/dev/null 2>&1; then
-    microdnf install -y $pkgs
-  elif command -v apt-get >/dev/null 2>&1; then
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq && apt-get install -y -qq --no-install-recommends $pkgs
-  elif command -v apk >/dev/null 2>&1; then
-    apk add --no-cache $pkgs
-  else
+# 返回该包在当前发行版下的候选名（空格分隔，按优先级从左到右尝试）
+pkg_candidates() {
+  local mgr="$1" pkg="$2"
+  case "$mgr" in
+    apt)
+      case "$pkg" in
+        libxml2-devel)                    echo libxml2-dev ;;
+        libxslt-devel|libxslt-dev)        echo libxslt1-dev ;;
+        openssl-devel)                    echo libssl-dev ;;
+        libffi-devel)                     echo libffi-dev ;;
+        libpq-devel|postgresql-devel)     echo libpq-dev ;;
+        libjpeg-devel|libjpeg-turbo-devel) echo libjpeg-dev ;;
+        zlib-devel)                       echo zlib1g-dev ;;
+        libyaml-devel)                    echo libyaml-dev ;;
+        libcurl-devel)                    echo libcurl4-openssl-dev ;;
+        sqlite-devel)                     echo libsqlite3-dev ;;
+        libopenblas-devel)                echo libopenblas-dev ;;
+        liblapack-devel)                  echo liblapack-dev ;;
+        postgresql-dev)                   echo libpq-dev ;;
+        *)                                echo "$pkg" ;;
+      esac
+      ;;
+    yum|dnf|microdnf)
+      case "$pkg" in
+        libxml2-dev)                      echo "libxml2-devel" ;;
+        libxslt1-dev|libxslt-dev)         echo "libxslt-devel" ;;
+        libssl-dev)                       echo "openssl-devel" ;;
+        libffi-dev)                       echo "libffi-devel" ;;
+        libpq-dev|libpq-devel)            echo "libpq-devel postgresql-devel" ;;
+        postgresql-devel)                 echo "postgresql-devel libpq-devel" ;;
+        libjpeg-dev|libjpeg-turbo-dev)    echo "libjpeg-turbo-devel" ;;
+        zlib1g-dev)                       echo "zlib-devel" ;;
+        libyaml-dev)                      echo "libyaml-devel" ;;
+        libcurl4-openssl-dev)             echo "libcurl-devel" ;;
+        libsqlite3-dev)                   echo "sqlite-devel" ;;
+        libopenblas-dev)                  echo "openblas-devel" ;;
+        liblapack-dev)                    echo "lapack-devel" ;;
+        postgresql-dev)                   echo "libpq-devel postgresql-devel" ;;
+        *)                                echo "$pkg" ;;
+      esac
+      ;;
+    apk)
+      case "$pkg" in
+        build-essential)                  echo build-base ;;
+        pkg-config)                       echo pkgconf ;;
+        libxml2-devel|libxml2-dev)        echo libxml2-dev ;;
+        libxslt-devel|libxslt1-dev|libxslt-dev) echo libxslt-dev ;;
+        openssl-devel|libssl-dev)         echo openssl-dev ;;
+        libffi-devel)                     echo libffi-dev ;;
+        libpq-devel|postgresql-devel|libpq-dev) echo postgresql-dev ;;
+        libjpeg-devel|libjpeg-dev)        echo libjpeg-turbo-dev ;;
+        zlib-devel|zlib1g-dev)            echo zlib-dev ;;
+        libyaml-devel|libyaml-dev)        echo yaml-dev ;;
+        libcurl-devel|libcurl4-openssl-dev) echo curl-dev ;;
+        sqlite-devel|libsqlite3-dev)      echo sqlite-dev ;;
+        libopenblas-devel|libopenblas-dev) echo openblas-dev ;;
+        liblapack-devel|liblapack-dev)    echo lapack-dev ;;
+        *)                                echo "$pkg" ;;
+      esac
+      ;;
+    *) echo "$pkg" ;;
+  esac
+}
+
+# 实际执行安装（不管失败处理，交给调用方判断）
+run_pkg_install() {
+  local mgr="$1"; shift
+  case "$mgr" in
+    yum)
+      yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "$@" && return 0
+      # manylinux 镜像里预置的 epel metalink 多数已失效，会让整批安装直接中断
+      yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False \
+        --disablerepo=epel "$@"
+      ;;
+    dnf)
+      dnf install -y "$@" && return 0
+      dnf install -y --disablerepo=epel "$@"
+      ;;
+    microdnf) microdnf install -y "$@" ;;
+    apt)
+      export DEBIAN_FRONTEND=noninteractive
+      # 源索引偶尔拉不动时不要挡住安装（镜像里通常已有可用列表）
+      apt-get update -qq >/dev/null 2>&1 || true
+      apt-get install -y -qq --no-install-recommends "$@"
+      ;;
+    apk) apk add --no-cache "$@" ;;
+    *) return 1 ;;
+  esac
+}
+
+install_sys_pkgs() {
+  local pkgs_str="${SYS_PKGS//,/ }"
+  [ -z "${pkgs_str//[[:space:]]/}" ] && return 0
+
+  local mgr
+  mgr="$(detect_pkg_manager)"
+  if [ -z "$mgr" ]; then
     warn "镜像里没有可识别的包管理器，跳过系统依赖安装"
     return 0
   fi
+
+  local -a raw=() primary=()
+  read -r -a raw <<< "$pkgs_str"
+  local p
+  for p in "${raw[@]}"; do
+    # 取候选列表的第一个（优先名）
+    primary+=($(pkg_candidates "$mgr" "$p" | awk '{print $1}'))
+  done
+
+  log "安装系统依赖（$mgr）: ${primary[*]}"
+  if run_pkg_install "$mgr" "${primary[@]}"; then
+    return 0
+  fi
+
+  # 整批失败时逐个重试候选名：yum 上 libpq-devel 与 postgresql-devel 随 EL 版本不同
+  warn "整批安装失败，改为逐个包尝试别名"
+  local cand installed ok=0
+  for p in "${raw[@]}"; do
+    ok=0
+    for cand in $(pkg_candidates "$mgr" "$p"); do
+      if run_pkg_install "$mgr" "$cand"; then
+        log "已安装 $p（实际包名：$cand）"
+        ok=1
+        break
+      fi
+    done
+    if [ $ok -eq 0 ]; then
+      err "系统依赖安装失败：$p（候选：$(pkg_candidates "$mgr" "$p")）"
+      return 1
+    fi
+  done
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -239,7 +365,10 @@ summary() {
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
-install_sys_pkgs
+if ! install_sys_pkgs; then
+  err "系统依赖安装失败，终止（请检查 system_packages 里的包名）"
+  exit 1
+fi
 prepare_python
 pip_wheel_args
 
