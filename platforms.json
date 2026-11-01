@@ -66,7 +66,8 @@
     "qemu": "arm",
     "interpreter": "/usr/local/bin/python",
     "repair": "none",
-    "sys_pkgs": "build-essential pkg-config",
+    "sys_pkgs": "build-essential pkg-config libpq-dev patchelf ca-certificates",
+    "psycopg_binary": true,
     "runs_on": "ubuntu-latest"
   },
   "musllinux_1_2_armv7l": {

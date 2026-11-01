@@ -18,6 +18,7 @@
 #   IGNORE_BUILD_ERRORS  true 时单个依赖构建失败不阻塞
 #   STRICT_REPAIR    true 时 auditwheel 修复失败即报错
 #   PLATFORM_NAME    仅用于日志
+#   AUTO_PSYCOPG_BINARY  true 时在 ARMv7 上自动构建 psycopg-binary
 # =============================================================================
 set -uo pipefail
 
@@ -39,6 +40,7 @@ EXTRA_PIP_ARGS="${EXTRA_PIP_ARGS:-}"
 IGNORE_BUILD_ERRORS="${IGNORE_BUILD_ERRORS:-true}"
 STRICT_REPAIR="${STRICT_REPAIR:-false}"
 PLATFORM_NAME="${PLATFORM_NAME:-$DOCKER_PLATFORM}"
+AUTO_PSYCOPG_BINARY="${AUTO_PSYCOPG_BINARY:-false}"
 
 JOBS="$(nproc 2>/dev/null || echo 2)"
 
@@ -52,6 +54,7 @@ echo "docker 架构 : $DOCKER_PLATFORM"
 echo "Python 版本 : ${VERSIONS[*]}"
 echo "修复工具    : $REPAIR"
 echo "系统依赖    : ${SYS_PKGS:-<无>}"
+echo "psycopg 兼容: ${AUTO_PSYCOPG_BINARY}"
 echo "pip 参数    : ${EXTRA_PIP_ARGS:-<无>}"
 echo "并行度      : $JOBS"
 echo "::endgroup::"
@@ -87,6 +90,7 @@ for py in "${VERSIONS[@]}"; do
     -e EXTRA_PIP_ARGS="$EXTRA_PIP_ARGS" \
     -e IGNORE_BUILD_ERRORS="$IGNORE_BUILD_ERRORS" \
     -e STRICT_REPAIR="$STRICT_REPAIR" \
+    -e AUTO_PSYCOPG_BINARY="$AUTO_PSYCOPG_BINARY" \
     -e PIP_CACHE_DIR=/io/ci/cache/pip \
     -e WORK_DIR=/tmp/wheelbuild \
     -e FAILURES_FILE="$failures_file" \

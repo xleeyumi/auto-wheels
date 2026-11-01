@@ -162,6 +162,7 @@ jobs:
           EXTRA_PIP_ARGS: ${{ inputs.pip_args }}
           IGNORE_BUILD_ERRORS: ${{ inputs.ignore_build_errors }}
           STRICT_REPAIR: ${{ inputs.strict_repair }}
+          AUTO_PSYCOPG_BINARY: ${{ matrix.psycopg_binary }}
         run: bash scripts/run-build.sh
 
       - name: 写入任务摘要

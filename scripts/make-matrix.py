@@ -28,6 +28,7 @@ DEFAULT_ENTRY = {
     "sys_pkgs": "",
     "runs_on": "ubuntu-latest",
     "description": "",
+    "psycopg_binary": False,
 }
 
 PY_RE = re.compile(r"^3\.(\d{1,2})$")

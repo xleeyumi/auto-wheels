@@ -20,6 +20,7 @@
 #   STRICT_REPAIR       1 时 auditwheel 修复失败即报错
 #   FAILURES_FILE       构建失败的依赖会写到这里
 #   PIP_CACHE_DIR       pip 下载缓存目录（可挂载复用）
+#   AUTO_PSYCOPG_BINARY  true 时在 ARMv7 上自动构建 psycopg-binary
 # =============================================================================
 set -o pipefail
 
@@ -35,11 +36,13 @@ STRICT_REPAIR="${STRICT_REPAIR:-false}"
 FAILURES_FILE="${FAILURES_FILE:-/io/ci/build-failures.txt}"
 PIP_CACHE_DIR="${PIP_CACHE_DIR:-/tmp/pip-cache}"
 WORK_DIR="${WORK_DIR:-/tmp/wheelbuild}"
+AUTO_PSYCOPG_BINARY="${AUTO_PSYCOPG_BINARY:-false}"
 
 RAW_DIR="$WORK_DIR/raw"
 LOG_DIR="$WORK_DIR/logs"
 FAILED_PKGS=()
 WARN_MSGS=()
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 log()  { printf '\033[1;34m[build]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[warn]\033[0m  %s\n' "$*"; WARN_MSGS+=("$*"); }
@@ -228,7 +231,7 @@ prepare_python() {
 # 3. 构建 wheel
 # ---------------------------------------------------------------------------
 pip_wheel_args() {
-  PIP_ARGS=(-m pip wheel --disable-pip-version-check --no-color --progress-bar off -w "$RAW_DIR")
+  PIP_ARGS=(-m pip wheel --disable-pip-version-check --no-color --progress-bar off -w "$RAW_DIR" --find-links "$RAW_DIR")
   # 用户追加参数按空格拆分
   read -r -a _extra <<< "$EXTRA_PIP_ARGS"
   PIP_ARGS+=(${_extra[@]+"${_extra[@]}"})
@@ -370,6 +373,31 @@ if ! install_sys_pkgs; then
   exit 1
 fi
 prepare_python
+
+# armv7l 没有官方 psycopg-binary wheel。先用目标解释器解析 psycopg 版本，
+# 再从同版本源码构建一个本地 psycopg-binary，后续 pip wheel 会通过
+# --find-links 命中它，客户端 requirements 无需改成 psycopg[c]。
+if is_true "$AUTO_PSYCOPG_BINARY"; then
+  if ! AUTO_PSYCOPG_BINARY=true \
+      REQUIREMENTS_FILE="$REQUIREMENTS_FILE" \
+      INTERPRETER="$INTERPRETER" \
+      RAW_DIR="$RAW_DIR" \
+      WORK_DIR="$WORK_DIR" \
+      PIP_CACHE_DIR="$PIP_CACHE_DIR" \
+      PYTHON_VERSION="$PYTHON_VERSION" \
+      PLATFORM_NAME="${PLATFORM_NAME:-unknown}" \
+      PSYCOPG_SOURCE_TAR="${PSYCOPG_SOURCE_TAR:-}" \
+      bash "$SCRIPT_DIR/build-psycopg-binary.sh"; then
+    FAILED_PKGS+=("psycopg[binary]（ARMv7 自动构建失败）")
+    if ! is_true "$IGNORE_BUILD_ERRORS"; then
+      err "psycopg[binary] 自动构建失败，终止"
+      summary || true
+      exit 1
+    fi
+    warn "psycopg[binary] 自动构建失败，继续构建其它依赖"
+  fi
+fi
+
 pip_wheel_args
 
 if ! build_from_requirements; then

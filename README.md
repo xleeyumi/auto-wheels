@@ -27,6 +27,8 @@ workflow_dispatch(requirements + 平台 + Python 版本)
 | `scripts/prepare-inputs.sh` | 把 Action 输入固化为 `ci/requirements.txt`（顺带去掉 CRLF） |
 | `scripts/run-build.sh` | 宿主机侧：按 Python 版本逐个启动目标架构容器 |
 | `scripts/build-wheels.sh` | 容器内：装系统依赖 → `pip wheel` → `auditwheel repair` |
+| `scripts/build-psycopg-binary.sh` | ARMv7：自动解析并源码构建 `psycopg-binary`，再打包 libpq |
+| `scripts/psycopg_binary_helper.py` | 解析版本、源码改名、wheel 动态库打包与校验 |
 | `scripts/gen_index.py` | 生成 find-links 列表页 + PEP 503 简单索引 + 首页 |
 | `scripts/publish-pages.sh` | 增量发布到 `gh-pages`（分支不存在时自动创建） |
 | `scripts/init-pages-branch.sh` | 可选：手动先建一个空的 `gh-pages`，便于提前配置 Pages |
@@ -115,11 +117,14 @@ gh run watch
 | `manylinux_2_28_x86_64` | 较新的 x86_64 发行版 | 同上 |
 | `musllinux_1_2_aarch64` | Alpine（64 位 ARM 容器） | musl ≥ 1.2 |
 | `musllinux_1_2_x86_64` | Alpine（x86 容器 / distroless） | musl ≥ 1.2 |
-| `armv7l` | 树莓派 32 位 Raspberry Pi OS | Debian bookworm 基线，wheel 标签为 `linux_armv7l` |
+| `armv7l` | 树莓派 32 位 Raspberry Pi OS | Debian bookworm 基线，wheel 标签为 `linux_armv7l`；自动补 `psycopg-binary` |
 | `musllinux_1_2_armv7l` | Alpine on 树莓派 32 位 | musl ≥ 1.2 |
 
 > `manylinux2014_*` 的基线是 CentOS 7，系统库偏老（例如 libpq 9.2）。需要较新系统库才能编译的
 > 包（如 `psycopg[c]`）请改用 `manylinux_2_28_*`；32 位 ARM 的 `armv7l` 是 Debian 12 基线，库比较新。
+>
+> `armv7l` 会自动处理仍写着 `psycopg[binary]` 的 requirements：从同版本源码构建 wheel，并把 libpq
+> 及其非 glibc 依赖装进 `psycopg_binary.libs`，客户端无需改成 `psycopg[c]`。
 
 新增平台只需在 `platforms.json` 里加一条（镜像、`docker_platform`、`qemu`、`interpreter`、
 `repair`）。`ppc64le` / `s390x` 用同样的方式加 `quay.io/pypa/manylinux2014_ppc64le` 即可。
@@ -294,34 +299,39 @@ Release 附件页面是**分页**的（每页 10 个），wheel 一多 pip 就�
 上方 `pip` 输出就是真实原因（通常是缺系统头文件、编译器或内存不足）。
 > 现版本已把「一个 wheel 都没构建出来」判为硬失败，不会再出现 build 全绿、publish 才报错的情况。
 
-**Q：`psycopg[binary]` 在 ARM 设备上装不上？**
-`psycopg-binary` 只发布 x86_64 / aarch64(manylinux) / macOS / Windows 的预编译 wheel，32 位 ARM
-（armv7l）既没有 wheel 也没有 sdist，pip 直接 `No matching distribution`。用环境标记按架构分流，
-其余平台继续享受预编译 libpq：
+**Q：`psycopg[binary]` 在 ARMv7 上装不上？**
+`psycopg-binary` 官方没有发布 armv7l wheel，也没有对应的 sdist。
+本仓库现在会在 `armv7l` 平台自动补一个兼容 wheel，**客户端不需要修改 requirements**：
 
 ```python
-psycopg[binary]>=3.1; platform_machine != "armv7l"
-psycopg[c]>=3.1;     platform_machine == "armv7l"
+psycopg[binary]>=3.1
 ```
 
-```bash
--f system_packages="libpq-dev"        # armv7l 构建时需要 libpq 头文件
-```
+构建时自动执行以下步骤：
 
-注意五点：
+1. 用目标 Python 和 requirements 解析实际选中的 `psycopg` 版本（例如 3.2.13）；
+2. 下载同版本的 `psycopg-c` sdist（其中已经包含生成好的 C 文件），按官方
+   `copy_to_binary.py` 的规则把 `psycopg-c` 改名为 `psycopg-binary`；
+3. 在 QEMU 模拟的 ARMv7 容器里从源码编译；
+4. 因为 auditwheel 没有 armv7l 策略，直接把 libpq、OpenSSL、Kerberos、LDAP 等非 glibc
+   动态库装进 `psycopg_binary.libs`，并把 RUNPATH 修到 wheel 内部；
+5. 安装生成的 wheel，实际导入 `psycopg_binary.pq` 做冒烟测试。
 
-* wheelhouse 里会同时出现 `psycopg-*.whl`（纯 Python）和 `psycopg_c-*.whl`（C 扩展），
-  设备上装 `psycopg[c]` 时两个都要在索引里。
-* **目标机需要 libpq 运行库**：`apt install libpq5`（RHEL 系 `libpq`）。armv7l 的 wheel 是
-  `linux_armv7l`（未做 auditwheel 修复），所以不会把 libpq 打进 wheel。
-  > 为什么不在 armv7l 上 auditwheel 打包 libpq：Debian bookworm 的 `patchelf` 是 0.14.3，
-  > 低于 auditwheel 6 要求的 0.14.5；退到 auditwheel 5.x 又缺 armv7l 策略支持。
-* **libpq 必须 ≥ 10**：`manylinux2014_*`（CentOS 7 基线）自带 libpq 9.2，编译会报
-  `PQsslInUse undeclared`；请改用 `manylinux_2_28_*`，或 `armv7l`（bookworm，libpq 15）。
-* `manylinux_2_28_*` 上执行 `-f repair=auditwheel` 可以把 libpq 一起 graft 进 wheel，
-  那种产物在目标机就不需要装 libpq 了。
-* 设备是树莓派 4/5 这类 64 位硬件时，**换 aarch64 系统是更彻底的选择**：`psycopg[binary]`、
-  numpy、pandas 全都有预编译 wheel，piwheels 的 cp312 缺档也不再影响你。
+随后正常的 `pip wheel -r requirements.txt` 会通过 `--find-links wheelhouse/` 命中这个本地
+`psycopg_binary-*.whl`，所以设备端仍然可以直接安装 `psycopg[binary]`。目标机**不需要**
+另外安装 `libpq5`。
+
+注意：
+
+* 这个 wheel 的平台标签是 `linux_armv7l`，以 `armv7l` 平台的 Debian 12 镜像为基线，
+  因此目标系统的 glibc 也应不低于 Debian 12；glibc 更老的系统需要换成对应的自托管 runner
+  或自行降级构建基线。
+* 自动构建依赖 PyPI 上的 `psycopg-c` sdist。对应版本不存在或网络不可达时，
+  Job Summary 会把它列为 `psycopg[binary]` 构建失败。
+* 如果项目愿意改依赖，`psycopg[c]` 仍然可用，但此时目标机必须安装 libpq 运行库；自动方案
+  的意义正是避免这种 requirements 和运行环境分叉。
+* 设备是树莓派 4/5 这类 64 位硬件时，**换 aarch64 系统仍是更彻底的选择**：官方
+  `psycopg[binary]`、numpy、pandas 都有更完整的预编译 wheel。
 
 **Q：armv7l 上 `numpy` / `pandas` 编译失败或超时？**
 32 位 ARM 上这两个包**没有预编译 wheel**（piwheels 也没有 cp312），只能现场编译，且 numpy 需要
