@@ -97,6 +97,8 @@ def logical_requirement_lines(path: Path, seen: set[Path] | None = None) -> Iter
             continue
 
         stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
         if stripped.startswith("-"):
             match = re.match(r"^(?:-r|--requirement|-c|--constraint)\s+(.+)$", stripped)
             if match:
