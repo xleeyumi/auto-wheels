@@ -222,7 +222,7 @@ prepare_python() {
   mkdir -p "$RAW_DIR" "$LOG_DIR" "$OUT_DIR" "$PIP_CACHE_DIR" || true
 
   # 老镜像自带 pip 版本过旧，可能读不懂较新的 sdist 元数据
-  if ! "$INTERPRETER" -m pip install -q -U pip >"$LOG_DIR/pip-upgrade.log" 2>&1; then
+  if ! "$INTERPRETER" -m pip install -q -U pip wheel >"$LOG_DIR/pip-upgrade.log" 2>&1; then
     warn "pip 升级失败（继续使用自带版本），详见 $LOG_DIR/pip-upgrade.log"
   fi
 }
